@@ -6,11 +6,20 @@ import matplotlib.pyplot as plt
 import numpy as np
 from itertools import chain, combinations, product
 
-class Not_Realizable (RuntimeError): pass
+class Not_Realizable (RuntimeError):
+    """Raised if a given set is not realizable."""
+    pass
 
-class Not_Realizing (RuntimeError): pass
+class Not_Realizing (RuntimeError):
+    """Raised if a given matrix does not realize a given set."""
+    pass
 
 class Realizable_Set:
+    """This class represents a realizable set.
+
+    This class memoizes its instances, as long as `Realizable_Set.remember_instances is True` (the default value is
+    `True`). Memoized instances can be accessed via the static method `get_instance`.
+    """
 
     instances = {}
 
@@ -18,6 +27,14 @@ class Realizable_Set:
 
     @staticmethod
     def get_instance(K):
+        """Return a memoized `Realizable_Set` instance.
+
+        Successfully calling this method (or the `Realizable_Set` constructor method) is not a guarantee that `K`
+        represents a `Realizable_Set`. Call the method `is_realizable` to check if your instance is indeed realizable.
+
+        :param K: An iterable of positive integers.
+        :return: type `Realizable_Set`.
+        """
 
         if not Realizable_Set.remember_instances:
             return Realizable_Set(K)
@@ -32,7 +49,24 @@ class Realizable_Set:
                 return ret
 
     def __init__(self, K):
-        self.K = tuple(sorted(list(K)))
+        """Using this constructor method bypasses memoization. It is preferred to use the `Realizable_Set.get_instance`
+        static method, which will call this constructor method if necessary.
+
+        Successfully calling this method (or the `Realizable_Set.get_instance` static method) is not a guarantee that
+        `K` represents a `Realizable_Set`. Call the method `is_realizable` to check if your instance is indeed
+        realizable.
+
+        :param K: An iterable of positive `int`s.
+        """
+
+        K = list(K)
+        for k in K:
+            if not isinstance(k, int) and not isinstance(k, np.int):
+                raise TypeError("elements of K must be ints")
+            elif k < 0:
+                raise ValueError("elements of K must be positive")
+
+        self.K = tuple(sorted(K))
         self._is_realizable_nece_cond = None
         self._blocks = None
         self._realizations = None
@@ -47,6 +81,11 @@ class Realizable_Set:
         return iter(self.K)
 
     def __getitem__(self, index):
+        """Enumerate K as k_0 < k_1 < ... k_{n-1}. This method returns k_{index}.
+
+        :param index: Non-negative `int`.
+        :return: Positive `int`.
+        """
         return self.K[index]
 
     def __contains__(self, item):
@@ -65,9 +104,11 @@ class Realizable_Set:
         return repr(self)
 
     def __format__(self, format_spec):
+        """I don't remember if this method works properly and I don't care to check in this moment."""
         return self.K.__format__(format_spec)
 
     def is_realizable_necessary_condition(self):
+        """Check if this instance satisfies the realizability necessary condition (Proposition 0.4 of the PDF)."""
 
         if self._is_realizable_nece_cond is not None:
             return self._is_realizable_nece_cond
@@ -113,6 +154,8 @@ class Realizable_Set:
     #         return self._realizable_suff_cond
 
     def is_realizable(self):
+        """Check if this instance is indeed realizable."""
+
         if self._is_realizable is not None:
             return self._is_realizable
 
@@ -154,14 +197,26 @@ class Realizable_Set:
                 )
                 return self._is_realizable
 
-    def get_realization_necessary_condition_vector(self):
+    def get_conjectured_realizable_sufficient_condition_vector(self):
+        """If the realizable set K is enumerated as k_0 < k_1 < ... < k_{n-1}, then this method returns the list of
+        differences k_i - (3/2)i + 1 for all i = 0, 1, ..., n-1. It is conjectured (Conjecture 0.6) that this list is
+        non-negative.
+
+        :return: A `list` of `int`s.
+        """
         return [k - ((3 / 2) * i + 1) for i,k in enumerate(self)]
 
     def get_realization_necessary_condition_direction_vector(self):
-        vect = self.get_realization_necessary_condition_vector()
+        vect = self.get_conjectured_realizable_sufficient_condition_vector()
         return ["u" if v0 <= v1 else "d" for v0,v1 in zip(vect[:-1],vect[1:])]
 
     def get_realizations(self):
+        """Calculate all k x k permutation matrices that realize this instance, assuming they exist, where k is the
+        maximum element of this `Realizable_Set`.
+
+        :raises: `Not_Realizable`, if this instance is not realizable.
+        :return: A `list` of `Realizing_Matrix`.
+        """
 
         n = self.K[-1]
 
@@ -181,9 +236,17 @@ class Realizable_Set:
             return self._realizations
 
     def is_blocking(self):
+        """Check if this instance represents a blocking set.
+
+        :return: `True` if this instance represents a blocking set, and `False` otherwise.
+        """
         return len(self.get_blocks()) > 0
 
     def get_blocks(self):
+        """If this instance represents a blocking set, return all the permutation matrices that realize it.
+
+        :return: A `list` of `Realizing_Matrix`.
+        """
 
         if self._blocks is not None:
             return self._blocks
@@ -219,10 +282,21 @@ class Realizable_Set:
             return self._blocks
 
     def blocking_condition(self, m):
+        """Enumerate K as k_1 < k_2 < ... < k_n. This method checks whether the interval [k_m + 1, 2m] intersects the
+        set K or not.
+
+        :param m: Positive `int`.
+        :return: `False` if [k_m + 1, 2m] intersects K, `True` otherwise.
+        """
         max_Kp = self[m-1]
         return all(i not in self for i in range(max_Kp + 1, 2 * m + 1))
 
-    def get_symmetric_realizing_matrices(self, m):
+    def get_symmetric_realizations(self, m):
+        """Calculate all m x m symmetric permutation matrices that realize this instance.
+
+        :param m: Positive `int`.
+        :return: A `list` of `Realizing_Matrix`.
+        """
 
         if self._symm_realizing_mats is not None:
             return self._symm_realizing_mats
@@ -230,7 +304,7 @@ class Realizable_Set:
         else:
 
             try:
-                realizing_cols = self._get_symmetric_realizing_matrices_dfs_helper(
+                realizing_cols = self._get_symmetric_realizations_dfs_helper(
                     m,
                     0,
                     [None]*m,
@@ -360,7 +434,7 @@ class Realizable_Set:
         else:
             return realizing_cols
 
-    def _get_symmetric_realizing_matrices_dfs_helper(self, m, curr_k_index, cols, frontier_cols):
+    def _get_symmetric_realizations_dfs_helper(self, m, curr_k_index, cols, frontier_cols):
 
         if len(frontier_cols) == 0:
             if sum(cols[i] is not None for i in range(m)) == len(self):
@@ -399,7 +473,7 @@ class Realizable_Set:
                 next_frontier_cols = []
 
             try:
-                _realizing_cols = self._get_symmetric_realizing_matrices_dfs_helper(
+                _realizing_cols = self._get_symmetric_realizations_dfs_helper(
                     m,
                     next_k_index,
                     next_cols,
@@ -484,12 +558,23 @@ class Realizable_Set:
             return realizing_cols
 
 class Realizing_Matrix:
+    """This class represents a matrix that realizes a given set.
+
+    This class memoizes its instances, as long as `Realizing_Matrix.remember_instances is True` (the default value is
+    `True`). Memoized instances can be accessed via the static method `get_instance`.
+    """
 
     instances = {}
 
     remember_instances = True
 
     def __init__(self):
+        """This constructor method has no arguments because all attributes of the matrix are set via the methods
+        `set_cols` or `set_array`.
+
+        The user will need to explicitly call this constructor method, as `Realizing_Matrix.get_instance` takes a
+        `Realizing_Matrix` as input.
+        """
 
         self.array = None
         self.cols = None
@@ -501,6 +586,19 @@ class Realizing_Matrix:
 
     @staticmethod
     def get_instance(mat):
+        """Get a memoized instance.
+
+        In order to call this method, do something like the following:
+
+            array = np.array( ... ) # replace the ... with your matrix
+            max_k = 3 # or whatever you want max_k to be
+            mat = Realizing_Matrix()
+            mat.set_array(array, max_k)
+            mat = Realizing_Matrix.get_instance(mat)
+
+        :param mat: type `Realizing_Matrix`.
+        :return: type `Realizing_Matrix`, the memoized instance.
+        """
 
         if not Realizing_Matrix.remember_instances:
             return mat
@@ -511,61 +609,6 @@ class Realizing_Matrix:
             else:
                 Realizing_Matrix.instances[mat] = mat
                 return mat
-
-    @staticmethod
-    def get_maximal_symmetric_swap_distance_matrix(m, cap = 20):
-
-        if m % 2 == 0:
-            raise NotImplementedError
-
-        mats = Realizing_Matrix.get_maximal_symmetric_realizing_matrices(m)
-        num_mats = len(mats)
-
-        all_neighs = set()
-        for mat in mats:
-            neighs = mat.get_swap_neighbors()
-            for neigh in neighs:
-                all_neighs.add((mat, neigh))
-
-        adj_mat = np.zeros((num_mats, num_mats), dtype = int)
-
-        for (mat1, mat2) in all_neighs:
-            i1 = mats.index(mat1)
-            i2 = mats.index(mat2)
-            adj_mat[i1,i2] = 1
-
-        dist_mat = np.copy(adj_mat)
-        for i in range(num_mats):
-            dist_mat[i,i] = -1
-
-        adj_mat_pow = adj_mat
-
-        d = 1
-        while np.any(dist_mat == 0) and d < cap:
-            d += 1
-            adj_mat_pow = np.matmul(adj_mat_pow, adj_mat)
-            for i1, i2 in product(range(num_mats), repeat=2):
-                if i1 != i2 and adj_mat_pow[i1,i2] != 0 and dist_mat[i1,i2] == 0:
-                    dist_mat[i1,i2] = d
-
-        dist_mat[np.nonzero(dist_mat == 0)] = -1
-        for i in range(num_mats):
-            dist_mat[i,i] = 0
-
-        return dist_mat
-
-    @staticmethod
-    def get_maximal_symmetric_realizing_matrices(m):
-
-        if m % 2 == 0:
-            raise NotImplementedError
-
-        ret = []
-        for K in combinations(range(1, m), (m - 1) // 2):
-            K = Realizable_Set.get_instance(K)
-            if K.check_realizable() > 0:
-                ret.extend(K.get_symmetric_realizing_matrices(m))
-        return ret
 
     def _symmetric_swap(self, i1, i2):
         new_A = np.copy(self.array)
@@ -580,9 +623,17 @@ class Realizing_Matrix:
         return ret
 
     def set_array(self, array, max_k):
+        """Set this matrix given a `numpy.ndarray`.
+
+        :param array: (type `numpy.ndarray`) 0-1 valued matrix with `dtype = int`.
+        :param max_k: Positive `int`. The is the maximum value of the `Realizable_Set` that this
+        matrix realizes.
+        :raises ValueError: If this method or `set_cols` has previously been called on this instance.
+        :raises ValueError: If `max_k` is too small or too large.
+        """
 
         if self.array is not None:
-            raise ValueError
+            raise ValueError("You cannot call `set_array` or `set_cols` twice on the same `Realizing_Matrix` instance.")
 
         self.array = array
         self.m = len(array)
@@ -594,9 +645,16 @@ class Realizing_Matrix:
         self._set_K(max_k)
 
     def set_cols(self, cols, max_k):
+        """Set this matrix given a `list` of columns. The list `cols[i]` represents the i-th column of the matrix.
+
+        :param cols: A `list` of `list`s.
+        :param max_k: Positive `int`.
+        :raises ValueError: If this method or `set_array` has previously been called on this instance.
+        :raises ValueError: If `max_k` is too small or too large.
+        """
 
         if self.cols is not None:
-            raise ValueError
+            raise ValueError("You cannot call `set_array` or `set_cols` twice on the same `Realizing_Matrix` instance.")
 
         self.cols = tuple(cols)
         self.m = len(self.cols)
@@ -606,6 +664,13 @@ class Realizing_Matrix:
         self._set_K(max_k)
 
     def _set_K(self, max_k):
+
+        if max_k <= 0:
+            raise ValueError("`max_k` must be positive.")
+
+        if max_k >= 2*len(self):
+            raise ValueError("`max_k` can be at most 2p-1, where p is the size of this matrix")
+
         K = []
         for i,j in enumerate(self.cols):
             k = self.m + i - j
@@ -685,22 +750,95 @@ class Realizing_Matrix:
             self._swap_compatibility_matrix = ret
             return self._swap_compatibility_matrix
 
+    def __len__(self):
+        if self.array is not None:
+            return self.array.shape[0]
+        else:
+            raise ValueError("You must call `set_cols` or `set_array` before calling this method.")
+
     def __hash__(self):
         if self.cols is not None:
             return hash(self.cols) + hash(self.K)
         else:
-            raise ValueError
+            raise ValueError("You must call `set_cols` or `set_array` before calling this method.")
 
     def __eq__(self, other):
 
-        if self.array is None or other.array is None:
-            raise ValueError
+        if self.array is not None and other.array is not None:
+            return self.cols == other.cols and self.K == other.K
+        else:
+            raise ValueError("You must call `set_cols` or `set_array` before calling this method.")
 
-        return self.cols == other.cols and self.K == other.K
+    def __repr__(self):
+        if self.array is not None:
+            return repr(self.array)
+        else:
+            raise ValueError("You must call `set_cols` or `set_array` before calling this method.")
+
+    def __str__(self):
+        return repr(self)
 
 def powerset(iterable):
     s = list(iterable)
     return chain.from_iterable(combinations(s, r) for r in range(len(s) + 1))
+
+def get_maximal_symmetric_swap_distance_matrix(m, cap = 20):
+
+    if m % 2 == 0:
+        raise NotImplementedError
+
+    mats = Realizing_Matrix.get_maximal_symmetric_realizing_matrices(m)
+    num_mats = len(mats)
+
+    all_neighs = set()
+    for mat in mats:
+        neighs = mat.get_swap_neighbors()
+        for neigh in neighs:
+            all_neighs.add((mat, neigh))
+
+    adj_mat = np.zeros((num_mats, num_mats), dtype = int)
+
+    for (mat1, mat2) in all_neighs:
+        i1 = mats.index(mat1)
+        i2 = mats.index(mat2)
+        adj_mat[i1,i2] = 1
+
+    dist_mat = np.copy(adj_mat)
+    for i in range(num_mats):
+        dist_mat[i,i] = -1
+
+    adj_mat_pow = adj_mat
+
+    d = 1
+    while np.any(dist_mat == 0) and d < cap:
+        d += 1
+        adj_mat_pow = np.matmul(adj_mat_pow, adj_mat)
+        for i1, i2 in product(range(num_mats), repeat=2):
+            if i1 != i2 and adj_mat_pow[i1,i2] != 0 and dist_mat[i1,i2] == 0:
+                dist_mat[i1,i2] = d
+
+    dist_mat[np.nonzero(dist_mat == 0)] = -1
+    for i in range(num_mats):
+        dist_mat[i,i] = 0
+
+    return dist_mat
+
+def get_symmetric_realizations_(m):
+
+    if m % 2 == 0:
+        raise NotImplementedError
+
+    ret = []
+    for K in combinations(range(1, m), (m - 1) // 2):
+        K = Realizable_Set.get_instance(K)
+        if K.check_realizable() > 0:
+            ret.extend(K.get_symmetric_realizations(m))
+    return ret
+
+
+K = Realizable_Set.get_instance((4,5,6))
+x=K.get_symmetric_realizations(7)
+x=0
 
 # def get_As(m, K):
 #
@@ -1075,7 +1213,7 @@ def calc_blocking_index(set_length, set_max, check_length, check_max):
         for n in range(check_length + 1):
             for Kp in combinations(range(K[-1]+1, check_max + 1), n):
                 Kp = Realizable_Set.get_instance(K.K + Kp)
-                if K[.is_blocking():
+                if K.is_blocking():
                     blocking_set_by_realizable_set[K] = Kp
 
 
@@ -1098,7 +1236,7 @@ def calc_blocking_index(set_length, set_max, check_length, check_max):
 #     print(n)
 #     for K in combinations(range(1,maxK+1), n):
 #         K = Realizable_Set.get_instance(K)
-#         vect = K.get_realization_necessary_condition_vector()
+#         vect = K.get_conjectured_realizable_sufficient_condition_vector()
 #         dirs = K.get_realization_necessary_condition_direction_vector()
 #         if K.is_realizable():
 #             for i,k in enumerate(K):
@@ -1126,4 +1264,4 @@ def calc_blocking_index(set_length, set_max, check_length, check_max):
 
 
 
-# x = K.get_symmetric_realizing_matrices(3)
+# x = K.get_symmetric_realizations(3)
