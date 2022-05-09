@@ -4,15 +4,33 @@ from math import floor, ceil
 import matplotlib.pyplot as plt
 
 import numpy as np
-from itertools import chain, combinations, product
+from itertools import chain, combinations, product, accumulate
+
 
 class Not_Realizable (RuntimeError):
     """Raised if a given set is not realizable."""
     pass
 
-class Not_Realizing (RuntimeError):
+class Not_Realizing_Matrix (RuntimeError):
     """Raised if a given matrix does not realize a given set."""
     pass
+
+class Not_Instantiated_Error (RuntimeError):
+    """Raised if the methods `set_array` or `set_cols` are not called before calling any other methods of
+    `Realizing_Matrix`."""
+    def __init__(self, method_name):
+        super().__init__(
+            f"You must call either the method `set_cols` or `set_array` before calling the method `{method_name}`."
+        )
+
+class Already_Instantiated_Error (RuntimeError):
+    """Raised if either of the methods `set_array` or `set_cols` are called twice on a single `Realizing_Matrix`
+    instance."""
+    def __init__(self):
+        super().__init__(
+            "You cannot call either of the methods `set_array` or `set_cols` twice on a single `Realizing_Matrix` " +
+            "instance."
+        )
 
 class Realizable_Set:
     """This class represents a realizable set.
@@ -73,6 +91,8 @@ class Realizable_Set:
         self._symm_realizing_mats = None
         self._realizable_suff_cond = None
         self._is_realizable = None
+        self._skinny_dim = None
+        self._fat_dim = None
 
     def __len__(self):
         return len(self.K)
@@ -197,7 +217,7 @@ class Realizable_Set:
                 )
                 return self._is_realizable
 
-    def get_conjectured_realizable_sufficient_condition_vector(self):
+    def get_conjectured_realizable_necessary_condition_vector(self):
         """If the realizable set K is enumerated as k_0 < k_1 < ... < k_{n-1}, then this method returns the list of
         differences k_i - (3/2)i + 1 for all i = 0, 1, ..., n-1. It is conjectured (Conjecture 0.6) that this list is
         non-negative.
@@ -207,31 +227,81 @@ class Realizable_Set:
         return [k - ((3 / 2) * i + 1) for i,k in enumerate(self)]
 
     def get_realization_necessary_condition_direction_vector(self):
-        vect = self.get_conjectured_realizable_sufficient_condition_vector()
+        vect = self.get_conjectured_realizable_necessary_condition_vector()
         return ["u" if v0 <= v1 else "d" for v0,v1 in zip(vect[:-1],vect[1:])]
 
     def get_realizations(self):
         """Calculate all k x k permutation matrices that realize this instance, assuming they exist, where k is the
         maximum element of this `Realizable_Set`.
 
+        Warning: If k is large relative to n, where n is `len(self)`, then this method may take a long time to return.
+
         :raises: `Not_Realizable`, if this instance is not realizable.
-        :return: A `list` of `Realizing_Matrix`.
+        :return: A `list` of `Realizing_Matrix`. If no matrices realize this set, an empty list is returned.
         """
 
-        n = self.K[-1]
+        kp = self.K[-1]
+        size = kp + 1
 
         if self._realizations is not None:
             return self._realizations
 
         else:
+
             try:
-                self._realizations = self._get_realizations_dfs_helper(
+                realization_templates = self._get_realizations_dfs_helper(
                     0,
-                    [None]*n,
-                    list(range(n-self[0], n))
+                    [None]*size,
+                    list(range(size-self[0], size))
                 )
+
             except Not_Realizable:
-                self._realizations = []
+                realization_templates = []
+
+            self._realizations = []
+
+            if len(realization_templates) > 0:
+
+                for template in realization_templates:
+
+                    all_possible_cols = [
+                        [j for j in range(i+1) if j not in template]
+                        for i in range(size)
+                        if template[i] is None
+                    ]
+
+                    ranges = [
+                        range(len(cols) - i)
+                        for i, cols in enumerate(all_possible_cols)
+                    ]
+
+                    last_possible_cols = all_possible_cols[-1]
+
+                    for comb in product(*ranges):
+
+                        realization_cols = []
+                        comb_index = 0
+                        empty = [1] * len(last_possible_cols)
+
+                        for i, j in enumerate(template):
+
+                            if j is None:
+                                for k, acc in enumerate(accumulate(empty)):
+                                    if acc > comb[comb_index]:
+                                        break
+                                    if k >= len(all_possible_cols[comb_index]):
+                                        raise RuntimeError
+                                realization_cols.append(last_possible_cols[k])
+                                comb_index += 1
+                                empty[k] = 0
+
+                            else:
+                                realization_cols.append(j)
+
+                        mat = Realizing_Matrix()
+                        mat.set_cols(realization_cols, kp)
+                        mat = Realizing_Matrix.get_instance(mat)
+                        self._realizations.append(mat)
 
             return self._realizations
 
@@ -325,6 +395,39 @@ class Realizable_Set:
                 self._symm_realizing_mats.append(A)
 
             return self._symm_realizing_mats
+
+    def get_skinny_fat_rectangle_dimensions(self):
+
+        if self._skinny_dim is not None:
+            return self._skinny_dim, self._fat_dim
+
+        else:
+
+            reals = self.get_realizations()
+
+            if not self.is_realizable():
+                raise Not_Realizable
+
+            skinny_diff = 0
+            fat_diff = len(self) - 1
+            kp = self[-1]
+
+            for real in reals:
+                upper = np.triu(real.array)
+                rows, cols = np.nonzero(upper)
+                horz_dim = kp - min(cols)
+                vert_dim = max(rows) + 1
+                dim = (horz_dim, vert_dim)
+                diff = abs(horz_dim - vert_dim)
+                if diff >= skinny_diff:
+                    skinny_dim = dim
+                if diff <= fat_diff:
+                    fat_dim = dim
+
+            self._skinny_dim = skinny_dim
+            self._fat_dim = fat_dim
+
+            return self._skinny_dim, self._fat_dim
 
     def _is_realizable_dfs_helper(self, curr_k_index, cols, frontier_cols):
 
@@ -497,7 +600,8 @@ class Realizable_Set:
 
     def _get_realizations_dfs_helper(self, curr_k_index, cols, frontier_cols):
 
-        m = self.K[-1]
+        kp = self.K[-1]
+        size = kp + 1
 
         if len(frontier_cols) == 0:
             if sum(j is not None for j in cols) == len(self):
@@ -512,8 +616,8 @@ class Realizable_Set:
             next_k = self[next_k_index]
             pre_next_frontier_cols = [
                 j
-                for j in range( max(0, m-next_k),  min(m, 2*m - next_k) )
-                if j not in cols and cols[j + next_k - m] is None
+                for j in range( max(0, size-next_k),  min(size, 2*size - next_k) )
+                if j not in cols and cols[j + next_k - size] is None
             ]
 
         non_realizable_branch = True
@@ -521,13 +625,13 @@ class Realizable_Set:
 
         for j in frontier_cols:
 
-            i = j - m + curr_k
+            i = j - size + curr_k
             next_cols = copy.copy(cols)
             next_cols[i] = j
 
             if next_k_index < len(self):
                 next_frontier_cols = copy.copy(pre_next_frontier_cols)
-                for jp in [j, m-next_k+i]:
+                for jp in [j, size-next_k+i]:
                     try:
                         next_frontier_cols.remove(jp)
                     except ValueError:
@@ -610,6 +714,122 @@ class Realizing_Matrix:
                 Realizing_Matrix.instances[mat] = mat
                 return mat
 
+    def set_array(self, array, max_k, skip_not_realizing_matrix_check = False):
+        """Set this matrix given a `numpy.ndarray`.
+
+        :param array: (type `numpy.ndarray`) 0-1 valued square matrix with `dtype = int`.
+        :param max_k: Positive `int`. The is the maximum value of the `Realizable_Set` that this
+        matrix realizes.
+        :param skip_not_realizing_matrix_check: (type `bool`, default `False`) If `True`, then skip value checks for
+        `array`, which may speed-up your code.
+        :raises TypeError: If `array` is not a `numpy.ndarray`, or `array` does not have `dtype=int`, or `max_k` is not
+        of type `int`.
+        :raises Already_Instantiated_Error: If this method or `set_cols` has previously been called on this instance.
+        :raises Not_Realizing_Matrix: If `array` does not represent a permutation matrix.
+        :raises ValueError: If `max_k` is too small or too large.
+        """
+
+        self._check_already_init_raise()
+
+        if not isinstance(array, np.ndarray) or not array.dtype == np.int or not isinstance(max_k, int):
+            raise TypeError
+
+        m = array.shape[0]
+
+        if (not skip_not_realizing_matrix_check and (
+            array.shape == (0,0) or
+            array.shape[0] != array.shape[1] or
+            np.any(np.sum(array, axis = 0) != 1) or
+            len(np.where(array == 1)[0]) != m or
+            len(np.where(array == 0)[0]) != m**2 - m
+        )):
+            raise Not_Realizing_Matrix
+
+        self.array = array
+        self.m = m
+        self.cols = []
+        for i in range(self.m):
+            j = np.nonzero(self.array[i, :])[0][0]
+            self.cols.append(j)
+        self.cols = tuple(self.cols)
+        self._set_K(max_k)
+
+    def set_cols(self, cols, max_k, skip_not_realizing_matrix_check = False):
+        """Set this matrix given a `list` of column indices. The number `cols[i]` is the column of the `i`-th row
+        that is 1; all other columns of the `i`-th row are 0.
+
+        :param cols: A `list` or `numpy.ndarray` of non-negative `int`s.
+        :param max_k: Positive `int`.
+        :param skip_not_realizing_matrix_check: (type `bool`, default `False`) If `True`, then skip value checks for
+        `cols`, which may speed-up your code, but may result in bizarre errors.
+        :raises TypeError: If `cols` is not a `list` or a `numpy.ndarray` with `dtype=int`, or if `max_k` is not an
+        `int`
+        :raises Not_Realizing_Matrix: If `cols` does not represent a permutation matrix.
+        :raises Already_Instantiated_Error: If this method or `set_array` has previously been called on this instance.
+        :raises ValueError: If `max_k` is too small or too large.
+        """
+
+        self._check_already_init_raise()
+
+        if (
+            not(isinstance(cols, list) or (isinstance(cols, np.ndarray) and cols.dtype == np.int))
+            or not isinstance(max_k, int)
+        ):
+            raise TypeError
+
+        if (not skip_not_realizing_matrix_check and (
+            (isinstance(cols, np.ndarray) and (
+                cols.ndim != 1 or
+                cols.shape == (0,) or
+                np.any(cols < 0) or
+                np.any(cols >= len(cols)) or
+                len(np.unique(cols)) != len(cols)
+            )) or
+            (isinstance(cols, list) and (
+                len(cols) == 0 or
+                not all(isinstance(c, int) for c in cols) or
+                any(c < 0 for c in cols) or
+                any(c >= len(cols) for c in cols) or
+                len(set(cols)) != len(cols)
+            ))
+        )):
+            raise Not_Realizing_Matrix
+
+        self.cols = tuple(cols)
+        self.m = len(self.cols)
+        self.array = np.zeros((self.m, self.m), dtype=int)
+        for i in range(self.m):
+            self.array[i, self.cols[i]] = 1
+        self._set_K(max_k)
+
+    def _check_init_raise(self, method_name):
+        if self.array is None:
+            raise Not_Instantiated_Error(method_name)
+
+    def _check_already_init_raise(self):
+        if self.array is not None:
+            raise Already_Instantiated_Error
+
+    def __len__(self):
+        self._check_init_raise("len")
+        return self.array.shape[0]
+
+    def __hash__(self):
+        self._check_init_raise("hash")
+        return hash(self.cols) + hash(self.K)
+
+    def __eq__(self, other):
+        self._check_init_raise("eq")
+        return self.cols == other.cols and self.K == other.K
+
+    def __repr__(self):
+        self._check_init_raise("repr")
+        return repr(self.array)
+
+    def __str__(self):
+        self._check_init_raise("str")
+        return repr(self)
+
     def _symmetric_swap(self, i1, i2):
         new_A = np.copy(self.array)
         new_A[i1, :] = self.array[i2, :]
@@ -621,47 +841,6 @@ class Realizing_Matrix:
         ret.set_array(new_A,self.m-1)
         ret = Realizing_Matrix.get_instance(ret)
         return ret
-
-    def set_array(self, array, max_k):
-        """Set this matrix given a `numpy.ndarray`.
-
-        :param array: (type `numpy.ndarray`) 0-1 valued matrix with `dtype = int`.
-        :param max_k: Positive `int`. The is the maximum value of the `Realizable_Set` that this
-        matrix realizes.
-        :raises ValueError: If this method or `set_cols` has previously been called on this instance.
-        :raises ValueError: If `max_k` is too small or too large.
-        """
-
-        if self.array is not None:
-            raise ValueError("You cannot call `set_array` or `set_cols` twice on the same `Realizing_Matrix` instance.")
-
-        self.array = array
-        self.m = len(array)
-        self.cols = []
-        for i in range(self.m):
-            j = np.nonzero(self.array[i, :])[0][0]
-            self.cols.append(j)
-        self.cols = tuple(self.cols)
-        self._set_K(max_k)
-
-    def set_cols(self, cols, max_k):
-        """Set this matrix given a `list` of columns. The list `cols[i]` represents the i-th column of the matrix.
-
-        :param cols: A `list` of `list`s.
-        :param max_k: Positive `int`.
-        :raises ValueError: If this method or `set_array` has previously been called on this instance.
-        :raises ValueError: If `max_k` is too small or too large.
-        """
-
-        if self.cols is not None:
-            raise ValueError("You cannot call `set_array` or `set_cols` twice on the same `Realizing_Matrix` instance.")
-
-        self.cols = tuple(cols)
-        self.m = len(self.cols)
-        self.array = np.zeros((self.m, self.m), dtype=int)
-        for i in range(self.m):
-            self.array[i, self.cols[i]] = 1
-        self._set_K(max_k)
 
     def _set_K(self, max_k):
 
@@ -679,15 +858,14 @@ class Realizing_Matrix:
                     self.array = None
                     self.cols = None
                     self.K = None
-                    raise Not_Realizing
+                    raise Not_Realizing_Matrix
                 else:
                     K.append(k)
         self.K = Realizable_Set.get_instance(K)
 
     def get_swap_neighbors(self):
 
-        if self.array is None:
-            raise ValueError
+        self._check_init_raise("get_swap_neighbors")
 
         if self._swap_neighbors is not None:
             return self._swap_neighbors
@@ -698,15 +876,14 @@ class Realizing_Matrix:
             for i1, i2 in combinations(range(self.m),2):
                 try:
                     self._swap_neighbors.append(self._symmetric_swap(i1,i2))
-                except Not_Realizing:
+                except Not_Realizing_Matrix:
                     pass
 
             return self._swap_neighbors
 
     def get_swap_class(self):
 
-        if self.array is None:
-            raise ValueError
+        self._check_init_raise("get_swap_class")
 
         if self._swap_class is not None:
             return self._swap_class
@@ -727,8 +904,7 @@ class Realizing_Matrix:
 
     def get_swap_compatibility_matrix(self):
 
-        if self.array is None:
-            raise ValueError
+        self._check_init_raise("get_swap_compatibility_matrix")
 
         if self._swap_compatibility_matrix is not None:
             return self._swap_compatibility_matrix
@@ -738,7 +914,7 @@ class Realizing_Matrix:
             for i1, i2 in combinations(range(self.m),2):
                 try:
                     self._symmetric_swap(i1,i2).cols
-                except Not_Realizing:
+                except Not_Realizing_Matrix:
                     continue
                 ret[i1, i2] = 1
                 ret[i2, i1] = 1
@@ -749,34 +925,6 @@ class Realizing_Matrix:
 
             self._swap_compatibility_matrix = ret
             return self._swap_compatibility_matrix
-
-    def __len__(self):
-        if self.array is not None:
-            return self.array.shape[0]
-        else:
-            raise ValueError("You must call `set_cols` or `set_array` before calling this method.")
-
-    def __hash__(self):
-        if self.cols is not None:
-            return hash(self.cols) + hash(self.K)
-        else:
-            raise ValueError("You must call `set_cols` or `set_array` before calling this method.")
-
-    def __eq__(self, other):
-
-        if self.array is not None and other.array is not None:
-            return self.cols == other.cols and self.K == other.K
-        else:
-            raise ValueError("You must call `set_cols` or `set_array` before calling this method.")
-
-    def __repr__(self):
-        if self.array is not None:
-            return repr(self.array)
-        else:
-            raise ValueError("You must call `set_cols` or `set_array` before calling this method.")
-
-    def __str__(self):
-        return repr(self)
 
 def powerset(iterable):
     s = list(iterable)
@@ -835,10 +983,6 @@ def get_symmetric_realizations_(m):
             ret.extend(K.get_symmetric_realizations(m))
     return ret
 
-
-K = Realizable_Set.get_instance((4,5,6))
-x=K.get_symmetric_realizations(7)
-x=0
 
 # def get_As(m, K):
 #
@@ -1236,7 +1380,7 @@ def calc_blocking_index(set_length, set_max, check_length, check_max):
 #     print(n)
 #     for K in combinations(range(1,maxK+1), n):
 #         K = Realizable_Set.get_instance(K)
-#         vect = K.get_conjectured_realizable_sufficient_condition_vector()
+#         vect = K.get_conjectured_realizable_necessary_condition_vector()
 #         dirs = K.get_realization_necessary_condition_direction_vector()
 #         if K.is_realizable():
 #             for i,k in enumerate(K):
