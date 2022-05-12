@@ -1,7 +1,4 @@
 import copy
-import time
-from math import floor, ceil
-import matplotlib.pyplot as plt
 
 import numpy as np
 from itertools import chain, combinations, product, accumulate
@@ -11,8 +8,16 @@ class Not_Realizable (RuntimeError):
     """Raised if a given set is not realizable."""
     pass
 
+class Not_Blocking (RuntimeError):
+    """Raised if a given set is not blocking."""
+    pass
+
 class Not_Realizing_Matrix (RuntimeError):
-    """Raised if a given matrix does not realize a given set."""
+    """Raised if a given matrix does not realize any set."""
+    pass
+
+class Not_Realizing_Matrix_Template (RuntimeError):
+    """Raised if a given matrix is not a realizing template for any set."""
     pass
 
 class Not_Instantiated_Error (RuntimeError):
@@ -79,7 +84,7 @@ class Realizable_Set:
 
         K = list(K)
         for k in K:
-            if not isinstance(k, int) and not isinstance(k, np.int):
+            if not isinstance(k, int) and not isinstance(k, np.int32) and not isinstance(k, np.int64):
                 raise TypeError("elements of K must be ints")
             elif k < 0:
                 raise ValueError("elements of K must be positive")
@@ -87,7 +92,7 @@ class Realizable_Set:
         self.K = tuple(sorted(K))
         self._is_realizable_nece_cond = None
         self._blocks = None
-        self._realizations = None
+        self._realization_templates = None
         self._symm_realizing_mats = None
         self._realizable_suff_cond = None
         self._is_realizable = None
@@ -126,6 +131,15 @@ class Realizable_Set:
     def __format__(self, format_spec):
         """I don't remember if this method works properly and I don't care to check in this moment."""
         return self.K.__format__(format_spec)
+
+    def get_max(self):
+        return self[-1]
+
+    def get_min(self):
+        return self[0]
+
+    def index(self, item):
+        return self.K.index(item)
 
     def is_realizable_necessary_condition(self):
         """Check if this instance satisfies the realizability necessary condition (Proposition 0.4 of the PDF)."""
@@ -187,7 +201,7 @@ class Realizable_Set:
 
             if Realizable_Set.remember_instances:
                 realizable = True
-                for i in range(1, len(self)):
+                for i in range(len(self)):
                     Kp = Realizable_Set.get_instance(self.K[:i+1])
 
                     if not realizable:
@@ -197,8 +211,8 @@ class Realizable_Set:
                             Ki = self[i]
                             Kp._is_realizable = Kp._is_realizable_dfs_helper(
                                 0,
-                                [None] * Ki,
-                                list(range(Ki - self[0], Ki))
+                                [None] * (Ki + 1),
+                                list(range(Ki + 1 - self[0], Ki + 1))
                             )
                             if not Kp._is_realizable:
                                 realizable = False
@@ -209,11 +223,11 @@ class Realizable_Set:
                 return self._is_realizable
 
             else:
-                maxK = self.K[-1]
+                kp = self.get_max()
                 self._is_realizable = self._is_realizable_dfs_helper(
                     0,
-                    [None] * maxK,
-                    list(range(maxK - self[0], maxK))
+                    [None] * (kp+1),
+                    list(range(kp+1 - self[0], kp+1))
                 )
                 return self._is_realizable
 
@@ -230,80 +244,43 @@ class Realizable_Set:
         vect = self.get_conjectured_realizable_necessary_condition_vector()
         return ["u" if v0 <= v1 else "d" for v0,v1 in zip(vect[:-1],vect[1:])]
 
-    def get_realizations(self):
-        """Calculate all k x k permutation matrices that realize this instance, assuming they exist, where k is the
-        maximum element of this `Realizable_Set`.
+    def get_realization_templates(self):
+        """Calculate all (k+1) x (k+1) strictly upper triangular matrices that realize this `Realizable_Set`, where k
+        is the largest element of this instance.
 
-        Warning: If k is large relative to n, where n is `len(self)`, then this method may take a long time to return.
-
-        :raises: `Not_Realizable`, if this instance is not realizable.
         :return: A `list` of `Realizing_Matrix`. If no matrices realize this set, an empty list is returned.
         """
 
-        kp = self.K[-1]
+        kp = self.get_max()
         size = kp + 1
 
-        if self._realizations is not None:
-            return self._realizations
+        if self._realization_templates is not None:
+            return self._realization_templates
 
         else:
 
             try:
-                realization_templates = self._get_realizations_dfs_helper(
+                self._realization_templates = self._get_realization_templates_dfs_helper(
                     0,
                     [None]*size,
-                    list(range(size-self[0], size))
+                    list(range(size - self.get_min(), size))
                 )
 
             except Not_Realizable:
-                realization_templates = []
+                self._realization_templates = []
 
-            self._realizations = []
+            return self._realization_templates
 
-            if len(realization_templates) > 0:
+    def get_realizations(self):
+        """Yield all (k+1) x (k+1) permutation matrices that realize this instance, assuming they exist, where k is the
+        maximum element of this `Realizable_Set`.
 
-                for template in realization_templates:
-
-                    all_possible_cols = [
-                        [j for j in range(i+1) if j not in template]
-                        for i in range(size)
-                        if template[i] is None
-                    ]
-
-                    ranges = [
-                        range(len(cols) - i)
-                        for i, cols in enumerate(all_possible_cols)
-                    ]
-
-                    last_possible_cols = all_possible_cols[-1]
-
-                    for comb in product(*ranges):
-
-                        realization_cols = []
-                        comb_index = 0
-                        empty = [1] * len(last_possible_cols)
-
-                        for i, j in enumerate(template):
-
-                            if j is None:
-                                for k, acc in enumerate(accumulate(empty)):
-                                    if acc > comb[comb_index]:
-                                        break
-                                    if k >= len(all_possible_cols[comb_index]):
-                                        raise RuntimeError
-                                realization_cols.append(last_possible_cols[k])
-                                comb_index += 1
-                                empty[k] = 0
-
-                            else:
-                                realization_cols.append(j)
-
-                        mat = Realizing_Matrix()
-                        mat.set_cols(realization_cols, kp)
-                        mat = Realizing_Matrix.get_instance(mat)
-                        self._realizations.append(mat)
-
-            return self._realizations
+        Warning: If k is large relative to n, where n is `len(self)`, then this generator may return a huge number of
+        elements.
+        """
+        for template in self.get_realization_templates():
+            for real in template.iterate_realizations():
+                yield real
 
     def is_blocking(self):
         """Check if this instance represents a blocking set.
@@ -313,7 +290,8 @@ class Realizable_Set:
         return len(self.get_blocks()) > 0
 
     def get_blocks(self):
-        """If this instance represents a blocking set, return all the permutation matrices that realize it.
+        """If this instance represents a blocking set, return all the matrices that realize it. If not, then
+        then return an empty `list`.
 
         :return: A `list` of `Realizing_Matrix`.
         """
@@ -323,31 +301,34 @@ class Realizable_Set:
 
         else:
 
-            if not self.is_realizable():
-                self._blocks = []
-                return self._blocks
+            n = len(self)
+            kp = self.get_max()
+            size = kp + 1
 
-            elif len(self) < (1 + max(self)) / 2.:
+            if 2 * n <= kp:
                 self._blocks = []
 
             else:
-                m = len(self)
-                self._blocks = []
                 try:
-                    realizing_cols = self._get_blocks_dfs_helper(
+                    self._blocks = self._get_blocks_dfs_helper(
                         0,
-                        [None]*m,
-                        list( range(m-self[0], m) )
+                        [None] * size,
+                        list(range(size - self.get_min(), size))
                     )
+                    is_blocking = True
 
-                    for cols in realizing_cols:
-                        A = Realizing_Matrix()
-                        A.set_cols(cols,self[-1])
-                        A = Realizing_Matrix.get_instance(A)
-                        self._blocks.append(A)
+                except (Not_Realizable, Not_Blocking):
+                    self._blocks = []
+                    is_blocking = False
 
-                except Not_Realizable:
-                    pass
+                if is_blocking:
+                    blocks = []
+                    for cols in self._blocks:
+                        mat = Realizing_Matrix()
+                        mat.set_cols([c + n - size for c in cols[:n]], kp, True)
+                        mat = Realizing_Matrix.get_instance(mat)
+                        blocks.append(mat)
+                    self._blocks = blocks
 
             return self._blocks
 
@@ -403,71 +384,109 @@ class Realizable_Set:
 
         else:
 
-            reals = self.get_realizations()
+            real_temps = self.get_realization_templates()
 
             if not self.is_realizable():
                 raise Not_Realizable
 
-            skinny_diff = 0
-            fat_diff = len(self) - 1
-            kp = self[-1]
+            kp = self.get_max()
 
-            for real in reals:
-                upper = np.triu(real.array)
-                rows, cols = np.nonzero(upper)
-                horz_dim = kp - min(cols)
-                vert_dim = max(rows) + 1
-                dim = (horz_dim, vert_dim)
-                diff = abs(horz_dim - vert_dim)
-                if diff >= skinny_diff:
-                    skinny_dim = dim
-                if diff <= fat_diff:
-                    fat_dim = dim
+            skinny_diff = 0
+            fat_diff = kp - 1
+
+            skinny_dim = (None, None)
+            fat_dim = (None, None)
+
+            for real_temp in real_temps:
+
+                dim = real_temp.get_dims()
+                diff = abs(dim[0] - dim[1])
+
+                if (diff > skinny_diff or (
+                    diff == skinny_diff and (
+                            skinny_dim[0] is None or
+                            min(*dim) > skinny_dim[0]
+                        )
+                    )
+                ):
+                    skinny_dim = (min(dim), max(dim))
+                    skinny_diff = diff
+
+                if (diff < fat_diff or (
+                    diff == fat_diff and (
+                            fat_dim[0] is None or
+                            min(*dim) < fat_dim[0]
+                        )
+                    )
+                ):
+                    fat_dim = (min(dim), max(dim))
+                    fat_diff = diff
 
             self._skinny_dim = skinny_dim
             self._fat_dim = fat_dim
 
             return self._skinny_dim, self._fat_dim
 
+    def _get_pre_next_frontier_cols_helper(self, curr_k_index, cols):
+
+        n = len(self)
+        size = self.get_max() + 1
+
+        if curr_k_index + 1 < n:
+            next_k = self[curr_k_index + 1]
+            return [
+                j
+                for j in range(size - next_k, size)
+                if j not in cols and cols[j + next_k - size] is None
+            ]
+
+        else:
+            return []
+
+    def _get_next_cols_helper(self, curr_k_index, j, cols):
+
+        size = self.get_max() + 1
+        i = j - size + self[curr_k_index]
+        next_cols = copy.copy(cols)
+        next_cols[i] = j
+        return next_cols
+
+    def _get_next_frontier_cols_helper(self, curr_k_index, j, pre_next_frontier_cols):
+
+        n = len(self)
+        i = j - n + self[curr_k_index]
+
+        if curr_k_index + 1 < n:
+            next_frontier_cols = copy.copy(pre_next_frontier_cols)
+
+            for jp in [j, n - self[curr_k_index + 1] + i]:
+                try:
+                    next_frontier_cols.remove(jp)
+                except ValueError:
+                    pass
+
+            return next_frontier_cols
+
+        else:
+            return []
+
     def _is_realizable_dfs_helper(self, curr_k_index, cols, frontier_cols):
 
-        m = self.K[-1]
+        n = len(self)
 
         if len(frontier_cols) == 0:
-            return sum(j is not None for j in cols) == len(self)
+            return sum(j is not None for j in cols) == n
 
-        curr_k = self[curr_k_index]
-        next_k_index = curr_k_index + 1
-
-        if next_k_index < len(self):
-            next_k = self[next_k_index]
-            try:
-                pre_next_frontier_cols = [
-                    j
-                    for j in range( max(0, m-next_k),  min(m, 2*m - next_k) )
-                    if j not in cols and cols[j + next_k - m] is None
-                ]
-            except IndexError:
-                pass
+        pre_next_frontier_cols = self._get_pre_next_frontier_cols_helper(curr_k_index, cols)
 
         for j in frontier_cols:
 
-            i = j - m + curr_k
-            next_cols = copy.copy(cols)
-            next_cols[i] = j
+            next_cols = self._get_next_cols_helper(curr_k_index, j, cols)
 
-            if next_k_index < len(self):
-                next_frontier_cols = copy.copy(pre_next_frontier_cols)
-                for jp in [j, m-next_k+i]:
-                    try:
-                        next_frontier_cols.remove(jp)
-                    except ValueError:
-                        pass
-            else:
-                next_frontier_cols = []
+            next_frontier_cols = self._get_next_frontier_cols_helper(curr_k_index, j, pre_next_frontier_cols)
 
             if self._is_realizable_dfs_helper(
-                next_k_index,
+                curr_k_index + 1,
                 next_cols,
                 next_frontier_cols
             ):
@@ -477,47 +496,36 @@ class Realizable_Set:
 
     def _get_blocks_dfs_helper(self, curr_k_index, cols, frontier_cols):
 
+        kp = self.get_max()
+        size = kp + 1
+        n = len(self)
+
         if len(frontier_cols) == 0:
-            if all(j is not None for j in cols):
-                return [cols]
+
+            if sum(j is not None for j in cols) == n:
+
+                if None in cols and cols.index(None) == n and min(cols[:n]) == size - n:
+                    return [cols]
+                else:
+                    raise Not_Blocking
+
             else:
                 raise Not_Realizable
 
-        curr_k = self[curr_k_index]
-        next_k_index = curr_k_index + 1
-
-        m = len(self)
-
-        if next_k_index < m:
-            next_k = self[next_k_index]
-            pre_next_frontier_cols = [
-                j
-                for j in range( max(0, m-next_k),  min(m, 2*m - next_k))
-                if j not in cols and cols[j + next_k - m] is None
-            ]
+        pre_next_frontier_cols = self._get_pre_next_frontier_cols_helper(curr_k_index, cols)
 
         non_realizable_branch = True
         realizing_cols = []
 
         for j in frontier_cols:
 
-            i = j - m + curr_k
-            next_cols = copy.copy(cols)
-            next_cols[i] = j
+            next_cols = self._get_next_cols_helper(curr_k_index, j, cols)
 
-            if next_k_index < m:
-                next_frontier_cols = copy.copy(pre_next_frontier_cols)
-                for jp in [j, m-next_k+i]:
-                    try:
-                        next_frontier_cols.remove(jp)
-                    except ValueError:
-                        pass
-            else:
-                next_frontier_cols = []
+            next_frontier_cols = self._get_next_frontier_cols_helper(curr_k_index, j, pre_next_frontier_cols)
 
             try:
                 _realizing_cols = self._get_blocks_dfs_helper(
-                    next_k_index,
+                    curr_k_index + 1,
                     next_cols,
                     next_frontier_cols
                 )
@@ -598,50 +606,36 @@ class Realizable_Set:
         else:
             return realizing_cols
 
-    def _get_realizations_dfs_helper(self, curr_k_index, cols, frontier_cols):
+    def _get_realization_templates_dfs_helper(self, curr_k_index, cols, frontier_cols):
 
-        kp = self.K[-1]
+        kp = self.get_max()
         size = kp + 1
 
         if len(frontier_cols) == 0:
+
             if sum(j is not None for j in cols) == len(self):
-                return [cols]
+                template = Realizing_Matrix_Template()
+                template.set_cols(cols, kp, True)
+                template = Realizing_Matrix_Template.get_instance(template)
+                return [template]
+
             else:
                 raise Not_Realizable
 
-        curr_k = self[curr_k_index]
-        next_k_index = curr_k_index + 1
-
-        if next_k_index < len(self):
-            next_k = self[next_k_index]
-            pre_next_frontier_cols = [
-                j
-                for j in range( max(0, size-next_k),  min(size, 2*size - next_k) )
-                if j not in cols and cols[j + next_k - size] is None
-            ]
+        pre_next_frontier_cols = self._get_pre_next_frontier_cols_helper(curr_k_index, cols)
 
         non_realizable_branch = True
         realizing_cols = []
 
         for j in frontier_cols:
 
-            i = j - size + curr_k
-            next_cols = copy.copy(cols)
-            next_cols[i] = j
+            next_cols = self._get_next_cols_helper(curr_k_index, j, cols)
 
-            if next_k_index < len(self):
-                next_frontier_cols = copy.copy(pre_next_frontier_cols)
-                for jp in [j, size-next_k+i]:
-                    try:
-                        next_frontier_cols.remove(jp)
-                    except ValueError:
-                        pass
-            else:
-                next_frontier_cols = []
+            next_frontier_cols = self._get_next_frontier_cols_helper(curr_k_index, j, pre_next_frontier_cols)
 
             try:
-                _realizing_cols = self._get_realizations_dfs_helper(
-                    next_k_index,
+                _realizing_cols = self._get_realization_templates_dfs_helper(
+                    curr_k_index + 1,
                     next_cols,
                     next_frontier_cols
                 )
@@ -688,8 +682,8 @@ class Realizing_Matrix:
         self._swap_class = None
         self._swap_compatibility_matrix = None
 
-    @staticmethod
-    def get_instance(mat):
+    @classmethod
+    def get_instance(cls, mat):
         """Get a memoized instance.
 
         In order to call this method, do something like the following:
@@ -704,20 +698,20 @@ class Realizing_Matrix:
         :return: type `Realizing_Matrix`, the memoized instance.
         """
 
-        if not Realizing_Matrix.remember_instances:
+        if not cls.remember_instances:
             return mat
 
         else:
-            if mat in Realizing_Matrix.instances.keys():
-                return Realizing_Matrix.instances[mat]
+            if mat in cls.instances.keys():
+                return cls.instances[mat]
             else:
-                Realizing_Matrix.instances[mat] = mat
+                cls.instances[mat] = mat
                 return mat
 
     def set_array(self, array, max_k, skip_not_realizing_matrix_check = False):
         """Set this matrix given a `numpy.ndarray`.
 
-        :param array: (type `numpy.ndarray`) 0-1 valued square matrix with `dtype = int`.
+        :param array: (type `numpy.ndarray` with `dtype = int`) The permutation matrix.
         :param max_k: Positive `int`. The is the maximum value of the `Realizable_Set` that this
         matrix realizes.
         :param skip_not_realizing_matrix_check: (type `bool`, default `False`) If `True`, then skip value checks for
@@ -731,7 +725,7 @@ class Realizing_Matrix:
 
         self._check_already_init_raise()
 
-        if not isinstance(array, np.ndarray) or not array.dtype == np.int or not isinstance(max_k, int):
+        if not isinstance(array, np.ndarray) or not array.dtype == int or not isinstance(max_k, int):
             raise TypeError
 
         m = array.shape[0]
@@ -844,24 +838,26 @@ class Realizing_Matrix:
 
     def _set_K(self, max_k):
 
+        self._check_init_raise("_set_K")
+
         if max_k <= 0:
             raise ValueError("`max_k` must be positive.")
 
         if max_k >= 2*len(self):
             raise ValueError("`max_k` can be at most 2p-1, where p is the size of this matrix")
 
-        K = []
-        for i,j in enumerate(self.cols):
-            k = self.m + i - j
-            if k <= max_k:
-                if k in K:
-                    self.array = None
-                    self.cols = None
-                    self.K = None
-                    raise Not_Realizing_Matrix
-                else:
-                    K.append(k)
+        upper = np.triu(self.array, len(self) - max_k)
+        rows, cols = np.nonzero(upper)
+        K = len(self) + rows - cols
+
         self.K = Realizable_Set.get_instance(K)
+
+    def get_dims(self):
+        upper = np.triu(self.array, 1)
+        rows, cols = np.nonzero(upper)
+        horz_dim = len(self) - np.min(cols)
+        vert_dim = np.max(rows) + 1
+        return horz_dim, vert_dim
 
     def get_swap_neighbors(self):
 
@@ -926,6 +922,137 @@ class Realizing_Matrix:
             self._swap_compatibility_matrix = ret
             return self._swap_compatibility_matrix
 
+class Realizing_Matrix_Template (Realizing_Matrix):
+
+    instances = {}
+
+    remember_instances = True
+
+    def set_array(self, array, max_k, skip_not_realizing_matrix_check = False):
+        """Set this matrix template given a `numpy.ndarray`.
+
+        :param array: (type `numpy.ndarray` with `dtype = int`) 0-1 valued square, strictly upper triangular matrix with
+        at most one 1 per column and at most one 1 per row.
+        :param max_k: Positive `int`. The is the maximum value of the `Realizable_Set` that this
+        matrix template realizes.
+        :param skip_not_realizing_matrix_check: (type `bool`, default `False`) If `True`, then skip value checks for
+        `array`, which may speed-up your code.
+        :raises TypeError: If `array` is not a `numpy.ndarray`, or `array` does not have `dtype=int`, or `max_k` is not
+        of type `int`.
+        :raises Already_Instantiated_Error: If this method or `set_cols` has previously been called on this instance.
+        :raises Not_Realizing_Matrix: If `array` does not represent a realizing matrix template
+        :raises ValueError: If `max_k` is too small or too large.
+        """
+
+        self._check_already_init_raise()
+
+        if not isinstance(array, np.ndarray) or not array.dtype == int or not isinstance(max_k, int):
+            raise TypeError
+
+        m = array.shape[0]
+
+        if (not skip_not_realizing_matrix_check and (
+            array.shape == (0,0) or
+            array.shape[0] != array.shape[1] or
+            np.any((np.sum(array, axis = 0) != 1) * (np.sum(array, axis = 0)) != 0)
+        )):
+            raise Not_Realizing_Matrix_Template
+
+        elif not skip_not_realizing_matrix_check:
+            ones = np.where(array == 1)
+            zeroes = np.where(array == 0)
+            if np.any(ones[0] >= ones[1]) or len(ones[0]) + len(zeroes[0]) < m ** 2:
+                raise Not_Realizing_Matrix_Template
+
+        self.array = array
+        self.m = m
+        self.cols = [None] * self.m
+        for i in range(self.m):
+            j = np.nonzero(self.array[i, :])[0]
+            if len(j) > 0:
+                self.cols[i] = j[0]
+        self.cols = tuple(self.cols)
+        self._set_K(max_k)
+
+    def set_cols(self, cols, max_k, skip_not_realizing_matrix_check = False):
+        """Set this matrix given a `list` of column indices. The number `cols[i]` is the column of the `i`-th row
+        that is 1; all other columns of the `i`-th row are 0. If `cols[i] is None`, then all entries of the `i`-th row
+        are 0.
+
+        :param cols: A `list` of non-negative `int`s and `None`s
+        :param max_k: Positive `int`.
+        :param skip_not_realizing_matrix_check: (type `bool`, default `False`) If `True`, then skip value checks for
+        `cols`, which may speed-up your code, but may result in bizarre errors.
+        :raises TypeError: If `cols` is not a `list`, or if `max_k` is not an `int`
+        :raises Not_Realizing_Matrix: If `cols` does not represent a permutation matrix.
+        :raises Already_Instantiated_Error: If this method or `set_array` has previously been called on this instance.
+        :raises ValueError: If `max_k` is too small or too large.
+        """
+
+        self._check_already_init_raise()
+
+        if (
+            not isinstance(cols, list) or not isinstance(max_k, int)
+        ):
+            raise TypeError
+
+        if not skip_not_realizing_matrix_check and (
+            len(cols) == 0 or
+            not all(isinstance(c, int) or c is None for c in cols) or
+            any(not (0 <= c < len(cols)) for c in cols if c is not None) or
+            len(set(cols)) != len(cols)
+        ):
+            raise Not_Realizing_Matrix
+
+        self.cols = tuple(cols)
+        self.m = len(self.cols)
+        self.array = np.zeros((self.m, self.m), dtype=int)
+        for i, c in enumerate(self.cols):
+            if c is not None:
+                self.array[i, c] = 1
+        self._set_K(max_k)
+
+    def iterate_realizations(self):
+
+        all_possible_cols = [
+            [j for j in range(i + 1) if j not in self.cols]
+            for i in range(len(self))
+            if self.cols[i] is None
+        ]
+
+        ranges = [
+            range(len(cols) - i)
+            for i, cols in enumerate(all_possible_cols)
+        ]
+
+        last_possible_cols = all_possible_cols[-1]
+
+        for comb in product(*ranges):
+
+            realization_cols = []
+            comb_index = 0
+            empty = [1] * len(last_possible_cols)
+
+            for i, j in enumerate(self.cols):
+
+                if j is None:
+                    for k, acc in enumerate(accumulate(empty)):
+                        if acc > comb[comb_index]:
+                            break
+                        if k >= len(all_possible_cols[comb_index]):
+                            raise RuntimeError
+                    realization_cols.append(last_possible_cols[k])
+                    comb_index += 1
+                    empty[k] = 0
+
+                else:
+                    realization_cols.append(j)
+
+            mat = Realizing_Matrix()
+            mat.set_cols(realization_cols, self.K.get_max())
+            mat = Realizing_Matrix.get_instance(mat)
+            yield mat
+
 def powerset(iterable):
     s = list(iterable)
     return chain.from_iterable(combinations(s, r) for r in range(len(s) + 1))
@@ -983,373 +1110,6 @@ def get_symmetric_realizations_(m):
             ret.extend(K.get_symmetric_realizations(m))
     return ret
 
-
-# def get_As(m, K):
-#
-#     K = sorted([m - k for k in K])
-#
-#
-# def get_block(K):
-#
-#     K = sorted(K)
-#
-#     if len(K) < (1 + max(K))/2.:
-#         return False, []
-#
-#     else:
-#         return _get_block_dfs_helper(K,[],[],list(range(1, 1+min(K))))
-#
-# def block_condition(K, block_index):
-#     max_Kp = K[block_index-1]
-#     return all(i not in K for i in range(max_Kp + 1, 2 * block_index + 1))
-
-# def _get_semiblock_dfs_helper(K, rows, cols, frontier_rows):
-#
-#     curr_k_index = len(rows)
-#
-#     if curr_k_index >= len(K):
-#         max_row, max_col = max(rows), max(cols)
-#         if (
-#             (max_row == len(K) and max_col == len(K)) or
-#             (max_row == len(K) + 1 and max_col + 1 == len(K))
-#         ):
-#             return True, [rows]
-#         else:
-#             return False, []
-#
-#     elif len(frontier_rows) == 0:
-#         raise Not_Realizable
-#
-#     curr_k = K[curr_k_index]
-#     next_k_index = curr_k_index + 1
-#
-#     if next_k_index < len(K):
-#         next_k = K[next_k_index]
-#         pre_next_frontier_rows = [
-#             i
-#             for i in range(1,next_k+1)
-#             if i not in rows and next_k-i not in cols
-#         ]
-#
-#     realizing_rows = []
-#     non_realizable_branch = True
-#
-#     for i in frontier_rows:
-#
-#         j = curr_k - i
-#         next_rows = rows + [i]
-#         next_cols = cols + [j]
-#
-#         if next_k_index < len(K):
-#             next_frontier_rows = copy.copy(pre_next_frontier_rows)
-#             try:
-#                 next_frontier_rows.remove(i)
-#             except ValueError: pass
-#             try:
-#                 next_frontier_rows.remove(next_k - j)
-#             except ValueError: pass
-#         else:
-#             next_frontier_rows = []
-#
-#         try:
-#             _is_semiblocking, _realizing_rows = _get_semiblock_dfs_helper(
-#                 K,
-#                 next_rows,
-#                 next_cols,
-#                 next_frontier_rows
-#             )
-#
-#             non_realizable_branch = False
-#             if _is_semiblocking:
-#                 realizing_rows.extend(_realizing_rows)
-#
-#         except Not_Realizable:
-#             pass
-#
-#     if non_realizable_branch:
-#         raise Not_Realizable
-#     else:
-#         return len(realizing_rows) > 0, realizing_rows
-#
-# def get_semiblock(K):
-#     return _get_semiblock_dfs_helper(K,[],[],list(range(1, 1+min(K))))
-#
-# def get_block_or_semiblock(K):
-#
-#     K = sorted(K)
-#
-#     if not is_realizable(K):
-#         raise Not_Realizable
-#
-#     for i in range(1,len(K)+1):
-#
-#         Kp = K[:i]
-#         max_Kp = K[i-1]
-#
-#         _is_blocking, blocks = get_block(Kp)
-#
-#         if _is_blocking:
-#             return "block", blocks
-#
-#         _is_semiblocking, semiblocks = get_semiblock(Kp)
-#
-#         if _is_semiblocking and all(i not in K for i in range(max_Kp+1,2*i-1)):
-#             return "semiblock", semiblocks
-#
-#     else:
-#         return None, []
-
-# def is_realizable(K):
-#     K = sorted(K)
-#     for i in range(1,len(K)):
-#         Kp = K[:i]
-#         if get_block(Kp)[0] and not block_condition(K, i):
-#             return False
-#     else:
-#         return True
-#
-# def get_impossible(m, max_subset_size = None, excluded = None):
-#     _excluded = []
-#     if excluded is not None:
-#         for sublist in excluded:
-#             _excluded.append(tuple(x+m for x in sublist))
-#     excluded = _excluded
-#     if max_subset_size is None:
-#         max_subset_size = (m-1)//2
-#     imp = []
-#     for K in powerset(range(1, m)):
-#         if 0 < len(K) <= max_subset_size:
-#             if len(get_As(m,K)) == 0:
-#                 for sublist in excluded:
-#                     if K[-len(sublist):] == sublist:
-#                         break
-#                 else:
-#                     imp.append(tuple(m-x for x in K))
-#     return imp
-
-# def get_K(A):
-#     K = set()
-#     m = len(A)
-#     for i in range(m):
-#         j = np.nonzero(A[i,:])[0][0]
-#         k = m+i-j
-#         K.add(k)
-#     return K
-
-# def get_swap_neighbors(A):
-#     m = len(A)
-#     ret = []
-#     for i1, i2 in combinations(range(m),2):
-#         new_A = np.copy(A)
-#         new_A[i1,:] = A[i2,:]
-#         new_A[i2,:] = A[i1,:]
-#         old_col = np.copy(new_A[:,i1])
-#         new_A[:,i1] = new_A[:,i2]
-#         new_A[:,i2] = old_col
-#         K = set()
-#         for i in range(m):
-#             j = np.nonzero(new_A[i,:])[0][0]
-#             k = m+i-j
-#             if k != m and k in K:
-#                 break
-#             elif k != m:
-#                 K.add(k)
-#         else:
-#             ret.append(new_A)
-#
-#     return ret
-
-# def get_swap_class(A):
-#     frontier = set(make_tuple(A))
-#     cls = set(make_tuple(A))
-#     while len(frontier) > 0:
-#         new_frontier = set()
-#         for B in frontier:
-#             for neigh in get_swap_neighbors(B):
-#                 if neigh not in cls:
-#                     cls.add(neigh)
-#                     new_frontier.add(neigh)
-#         frontier = new_frontier
-#     return cls
-
-
-# def make_tuple(A):
-#     m = len(A)
-#     ret = []
-#     for i in range(m):
-#         j = np.nonzero(A[i,:])[0][0]
-#         ret.append(j)
-#     return tuple(ret)
-#
-# def make_array(tup):
-#     m = len(tup)
-#     A = np.zeros((m,m),dtype=int)
-#     for i in range(m):
-#         j = tup[i]
-#         A[i,j] = 1
-#     return A
-
-# print(get_impossible(13, None,
-#                      [
-#                          (-2,-1),
-#                          (-4,-3,-1),
-#                          (-4,-3,-2),
-#                          (-7, -6, -5, -3, -2),
-#                          (-8, -6, -5, -3, -2),
-#                          (-10, -9, -6, -5, -3, -2),
-#                          (-4, -3, -1),
-#                          (-6, -5, -3, -1),
-#                          (-8, -7, -5, -3, -1),
-#                          (-10, -9, -7, -5, -3, -1),
-#                          (-7, -6, -5, -4, -1),
-#                          (-8, -6, -5, -4, -1),
-#                          (-10, -9, -6, -5, -4, -1),
-#                          (-7, -6, -5, -4, -2)
-#                      ]))
-
-# print(is_blocking([2,4,5,6,8]))
-
-# print(get_block_or_semiblock([2,4,5]))
-
-# print(is_realizable([4,5,6]))
-
-# print(get_block_or_semiblock([4,5,6]))
-
-# m = 7
-#
-# nons = []
-
-# for K in combinations(range(1,m), (m-1)//2):
-#     try:
-#         kind, block = get_block_or_semiblock(K)
-#         As = get_As(m,K)
-#         if len(As) == 0 and kind is None:
-#             nons.append(K)
-#         if kind is None:
-#             print(K)
-#     except Not_Realizable:
-#         pass
-
-# m=7
-# K = [3,5,6]
-#
-# print(get_block_or_semiblock(K))
-pass
-
-# A = np.array([
-#     [0,0,0,0,1,0,0],
-#     [0,0,1,0,0,0,0],
-#     [0,1,0,0,0,0,0],
-#     [0,0,0,0,0,0,1],
-#     [1,0,0,0,0,0,0],
-#     [0,0,0,0,0,1,0],
-#     [0,0,0,1,0,0,0]
-# ])
-
-# A = np.array([
-#     [0,1,0],
-#     [1,0,0],
-#     [0,0,1]
-# ])
-
-# A = np.array([
-#     [0,1,0,0,0],
-#     [1,0,0,0,0],
-#     [0,0,0,0,1],
-#     [0,0,0,1,0],
-#     [0,0,1,0,0]
-# ])
-
-# A = np.array([
-#     [0,0,0,0,1,0,0,0,0,0,0],
-#     [0,0,0,1,0,0,0,0,0,0,0],
-#     [0,0,1,0,0,0,0,0,0,0,0],
-#     [0,1,0,0,0,0,0,0,0,0,0],
-#     [1,0,0,0,0,0,0,0,0,0,0],
-#     [0,0,0,0,0,0,0,0,0,0,1],
-#     [0,0,0,0,0,0,0,0,0,1,0],
-#     [0,0,0,0,0,0,0,0,1,0,0],
-#     [0,0,0,0,0,0,0,1,0,0,0],
-#     [0,0,0,0,0,0,1,0,0,0,0],
-#     [0,0,0,0,0,1,0,0,0,0,0]
-# ])
-
-# A = np.array([
-#     [0,0,0,0,0,0,0,0,0,0,1],
-#     [0,0,0,0,0,0,0,0,0,1,0],
-#     [0,0,0,0,0,0,0,0,1,0,0],
-#     [0,0,0,0,0,0,0,1,0,0,0],
-#     [0,0,0,0,0,0,1,0,0,0,0],
-#     [0,0,0,0,0,1,0,0,0,0,0],
-#     [0,0,0,0,1,0,0,0,0,0,0],
-#     [0,0,0,1,0,0,0,0,0,0,0],
-#     [0,0,1,0,0,0,0,0,0,0,0],
-#     [0,1,0,0,0,0,0,0,0,0,0],
-#     [1,0,0,0,0,0,0,0,0,0,0]
-# ])
-
-# mat = Realizing_Matrix()
-# mat.set_array(A)
-
-# swap_Ks = set(A.K for A in mat.get_swap_neighbors())
-
-# cls = mat.get_swap_class()
-# symm = get_number_maximal_symmetric_realizing_matrices(11)
-
-# x = mat.get_swap_compatibility_matrix()
-#
-pass
-
-
-# mat.set_cols(mat.cols)
-# pass
-
-# K = Realizable_Set([2,3,4,7])
-# print(K.check_realizable())
-
-# get_swap_class(A)
-
-# print(np.all(make_array(make_tuple(A)) == A))
-#
-# neigh_Ks = set()
-#
-# for neigh in get_swap_neighbors(A):
-#     neigh_Ks.add(tuple(sorted(list(get_K(neigh)))[:3]))
-#
-# print(neigh_Ks)
-#
-# print(get_block([2,5,6]))
-
-# print(Realizable_Set([2,3]).get_blocks())
-
-# print(Realizable_Set([2,3,4]).check_realizable())
-
-# mat = Realizing_Matrix()
-# mat.set_array(A, len(A)-1)
-# mat = Realizing_Matrix.get_instance(mat)
-#
-# cls1 = mat.get_swap_class()
-# cls2 = Realizing_Matrix.get_maximal_symmetric_realizing_matrices(len(A))
-
-# for mat in cls2:
-#     if cls2.count(mat) > 1 or len(mat.K) < 3:
-#         pass
-
-# mat = Realizing_Matrix.get_maximal_symmetric_swap_distance_matrix(11)
-# print(np.max(mat))
-
-# print(Realizable_Set([2,4,5,6,7]).is_realizable_sufficient_condition())
-
-pass
-
-# print(Realizable_Set([3,4,5,6,7]).get_realizations())
-
-# mat = Realizing_Matrix()
-# mat.set_cols([4,2,5,3,6,0,1],7)
-pass
-
-# print(Realizable_Set.get_instance([6,7,8,9,10,11,12,13,14,15,16]).is_blocking())
-
 def calc_blocking_index(set_length, set_max, check_length, check_max):
     blocking_set_by_realizable_set = {}
     for K in combinations(range(1,set_max+1), set_length):
@@ -1359,53 +1119,3 @@ def calc_blocking_index(set_length, set_max, check_length, check_max):
                 Kp = Realizable_Set.get_instance(K.K + Kp)
                 if K.is_blocking():
                     blocking_set_by_realizable_set[K] = Kp
-
-
-
-
-
-# print(Realizable_Set.get_instance([2,4,5,6,7]).is_realizable_necessary_condition())
-#
-# Realizable_Set.remember_instances = True
-# Realizing_Matrix.remember_instances = True
-#
-# maxK = 10
-# maxN = 7
-# realX = []
-# realY = []
-# counterX = []
-# counterY = []
-# for n in range(1, maxN+1):
-#     start = time.time()
-#     print(n)
-#     for K in combinations(range(1,maxK+1), n):
-#         K = Realizable_Set.get_instance(K)
-#         vect = K.get_conjectured_realizable_necessary_condition_vector()
-#         dirs = K.get_realization_necessary_condition_direction_vector()
-#         if K.is_realizable():
-#             for i,k in enumerate(K):
-#                 realX.append(i+1)
-#                 realY.append(k)
-#             if any(d == 0 or d == 1/2 for d in vect):
-#                 print(f"good {K} {vect} {''.join(dirs)} {sum(vect)/len(K)}")
-#         elif K.is_realizable_necessary_condition():
-#             print(f"bad  {K} {vect} {''.join(dirs)} {sum(vect)/len(K)}")
-#     print(time.time() - start)
-#
-#     # print(N,1, len(counterexamples1))
-#     # print(N,2, len(counterexamples2))
-#
-# start = time.time()
-# plt.figure()
-# plt.scatter(realX,realY, s=20, c="r")
-# plt.scatter(counterX, counterY, s=10, c="b")
-# I = list(range(1,max(realX)+1))
-# plt.plot(I, [ceil((3/2)*i - 0.5) for i in I])
-# # plt.plot(I, [2*i - 3 for i in I])
-# print(time.time() - start)
-# plt.show()
-
-
-
-
-# x = K.get_symmetric_realizations(3)
