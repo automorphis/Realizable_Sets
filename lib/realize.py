@@ -84,12 +84,16 @@ class Realizable_Set:
 
         K = list(K)
         for k in K:
-            if not isinstance(k, int) and not isinstance(k, np.int32) and not isinstance(k, np.int64):
-                raise TypeError("elements of K must be ints")
+            if not isinstance(k, (int, np.int32, np.int64)):
+                raise TypeError("elements of `K` must be of type `int`")
             elif k < 0:
-                raise ValueError("elements of K must be positive")
+                raise ValueError("elements of `K` must be positive")
 
         self.K = tuple(sorted(K))
+
+        if len(set(self.K)) != len(self.K):
+            raise ValueError("elements of `K` must be unique.")
+
         self._is_realizable_nece_cond = None
         self._blocks = None
         self._realization_templates = None
@@ -725,7 +729,11 @@ class Realizing_Matrix:
 
         self._check_already_init_raise()
 
-        if not isinstance(array, np.ndarray) or not array.dtype == int or not isinstance(max_k, int):
+        if (
+            not isinstance(array, np.ndarray) or
+            not array.dtype == int or
+            not isinstance(max_k, (int, np.int32, np.int64))
+        ):
             raise TypeError
 
         m = array.shape[0]
@@ -818,11 +826,11 @@ class Realizing_Matrix:
 
     def __repr__(self):
         self._check_init_raise("repr")
-        return repr(self.array)
+        return repr(self.array)[:-1] + ", dtype=int)"
 
     def __str__(self):
         self._check_init_raise("str")
-        return repr(self)
+        return "".join(x for x in repr(self) if x in ["0", "1", "\n"])
 
     def _symmetric_swap(self, i1, i2):
         new_A = np.copy(self.array)
@@ -850,7 +858,38 @@ class Realizing_Matrix:
         rows, cols = np.nonzero(upper)
         K = len(self) + rows - cols
 
+        if len(np.unique(K)) != len(K):
+            raise Not_Realizing_Matrix
+
         self.K = Realizable_Set.get_instance(K)
+
+    def delete_one(self, i):
+        """Delete the i-th row and j-th column of this matrix, where j is the index of the column of the 1 in the i-th
+        row. Does not change this instance.
+
+        :param i: (non-negative `int`) The row to delete.
+        :raises Not_Realizing_Matrix: If deleting the i-th row and j-th column gives more than one 1 in any k-diagonal,
+        where `k <= self.K.get_max()`.
+        :raises TypeError: If `i` is not an `int`.
+        :raises ValueError: If `i` is negative.
+        :return:
+        """
+
+        self._check_init_raise("delete_one")
+
+        if not isinstance(i, int):
+            raise TypeError("`i` must be an `int`.")
+
+        if i < 0:
+            raise ValueError("`i` must be non-negative.")
+
+        j = self.cols[i]
+        ret = np.delete(self.array, i, axis = 0)
+        ret = np.delete(ret, j, axis = 1)
+        mat = Realizing_Matrix()
+        mat.set_array(ret, min(self.K.get_max(), 2*len(self) - 3), False)
+        mat = Realizing_Matrix.get_instance(mat)
+        return mat
 
     def get_dims(self):
         upper = np.triu(self.array, 1)
