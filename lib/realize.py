@@ -96,12 +96,16 @@ class Realizable_Set:
 
         self._is_realizable_nece_cond = None
         self._blocks = None
+        self._num_blocks = None
         self._realization_templates = None
         self._symm_realizing_mats = None
         self._realizable_suff_cond = None
         self._is_realizable = None
+        self._is_blocking = None
         self._skinny_dim = None
         self._fat_dim = None
+        self._large_blking_pfx = None
+        self._norm_compl_large_blking_pfx = None
 
     def __len__(self):
         return len(self.K)
@@ -145,54 +149,68 @@ class Realizable_Set:
     def index(self, item):
         return self.K.index(item)
 
-    def is_realizable_necessary_condition(self):
-        """Check if this instance satisfies the realizability necessary condition (Proposition 0.4 of the PDF)."""
+    def get_initial_segment(self, i):
+        """Return {k_1, ..., k_i}, where `n = len(self` and k_1 < ... < k_i < ... < k_n are the ordered elements
+        of this instance.
 
-        if self._is_realizable_nece_cond is not None:
+        :param i: (type `int`) positive integer.
+        :raise TypeError: If `i` is not type `int`.
+        :raise ValueError: If `i` is too large or too small.
+        :return: (type `Realizable_Set`)
+        """
+
+        if not isinstance(i, int):
+            raise TypeError("`i` is not an `int`")
+
+        if not(1 <= i <= len(self)):
+            raise ValueError("`i` must be between 1 and `len(self)`")
+
+        return Realizable_Set.get_instance(self.K[:i])
+
+    def is_realizable_necessary_condition(self):
+        """Check if this instance satisfies the realizability necessary condition, as follows: Let `n = len(K)` and
+        write K = {k_1, ..., k_n}, where k_1 < ... < k_n. For all i = 1, ..., n-1, if {k_1, ..., k_i} is blocking, then
+        K \cap [k_i + 1, 2n] is empty.
+
+        The necessary condition above is not sufficient, so non-realizable sets may return `True`.
+
+        It is best to call this function when `Realizable_Set.remember_instances is True`, otherwise it can be quite
+        slow.
+
+        :return: (type `bool`)
+
+        """
+
+        if self._is_realizable:
+            self._set_is_realizable_nece_cond(True)
+            return True
+
+        elif self._is_realizable_nece_cond is not None:
             return self._is_realizable_nece_cond
 
         else:
 
-            for i, k in enumerate(self):
-                Kp = Realizable_Set.get_instance(self.K[:i+1])
-                if (
-                    (3/2)*i + 1 > k or (
-                        i > 0 and
-                        Realizable_Set.get_instance(self.K[:i]).is_blocking() and
-                        not self.blocking_condition(i)
-                    )
-                ):
-                    self._is_realizable_nece_cond = False
+            for i, k in zip(range(1, len(self)), self.K[:-1]):
+                Kp = self.get_initial_segment(i)
+                if Kp.is_blocking(False) and any(l in range(k+1,2*i+1) for l in self.K[i:]):
+                    self._set_is_realizable_nece_cond(False)
                     break
 
             else:
-                self._is_realizable_nece_cond = True
+                self._set_is_realizable_nece_cond(True)
 
             return self._is_realizable_nece_cond
 
-    # def is_realizable_sufficient_condition(self):
-    #
-    #     if self._realizable_suff_cond is not None:
-    #         return self._realizable_suff_cond
-    #
-    #     else:
-    #         for i in range(1, len(self.K)):
-    #             Kp = Realizable_Set.get_instance(self.K[:i])
-    #             if (
-    #                 not Kp.is_realizable() or
-    #                 (Kp.is_blocking() and not self.blocking_condition(i)) or
-    #                 2*i - 1 >= self.K[i]
-    #             ):
-    #                 self._realizable_suff_cond = False
-    #                 break
-    #
-    #         else:
-    #             self._realizable_suff_cond = True
-    #
-    #         return self._realizable_suff_cond
+    def is_realizable(self, use_necessary_condition = True):
+        """Check if this instance is indeed realizable.
 
-    def is_realizable(self):
-        """Check if this instance is indeed realizable."""
+        :param use_necessary_condition: (type `bool`, default `True`). Whether to call the method
+        `is_realizable_necessary_condition` to check for non-realizability. Warning: That method can be quite slow if
+        `Realizable_Set.remember_instances is False`, so it is best to set `use_necessary_condition = False` in that
+        case.
+        :return: (type `bool)
+
+        """
 
         if self._is_realizable is not None:
             return self._is_realizable
@@ -200,25 +218,36 @@ class Realizable_Set:
         else:
 
             if len(self) == 1:
-                self._is_realizable = True
+                self._set_is_realizable(True)
                 return self._is_realizable
 
             if Realizable_Set.remember_instances:
                 realizable = True
                 for i in range(len(self)):
-                    Kp = Realizable_Set.get_instance(self.K[:i+1])
+                    Kp = self.get_initial_segment(i+1)
 
                     if not realizable:
-                        Kp._is_realizable = False
+                        Kp._set_is_realizable(False)
 
                     elif Kp._is_realizable is None:
-                            Ki = self[i]
-                            Kp._is_realizable = Kp._is_realizable_dfs_helper(
-                                0,
-                                [None] * (Ki + 1),
-                                list(range(Ki + 1 - self[0], Ki + 1))
-                            )
-                            if not Kp._is_realizable:
+
+                            nece_cond = True
+                            if use_necessary_condition:
+                                nece_cond = Kp.is_realizable_necessary_condition()
+
+                            if nece_cond:
+
+                                Ki = self[i]
+                                Kp._set_is_realizable(Kp._is_realizable_dfs_helper(
+                                    0,
+                                    [None] * (Ki + 1),
+                                    list(range(Ki + 1 - self[0], Ki + 1))
+                                ))
+                                if not Kp._is_realizable:
+                                    realizable = False
+
+                            else:
+                                Kp._set_is_realizable(False)
                                 realizable = False
 
                     elif not Kp._is_realizable:
@@ -227,13 +256,37 @@ class Realizable_Set:
                 return self._is_realizable
 
             else:
-                kp = self.get_max()
-                self._is_realizable = self._is_realizable_dfs_helper(
-                    0,
-                    [None] * (kp+1),
-                    list(range(kp+1 - self[0], kp+1))
-                )
+
+                nece_cond = True
+                if use_necessary_condition:
+                    nece_cond = self.is_realizable_necessary_condition()
+
+                if nece_cond:
+
+                    kp = self.get_max()
+                    self._set_is_realizable(self._is_realizable_dfs_helper(
+                        0,
+                        [None] * (kp+1),
+                        list(range(kp+1 - self[0], kp+1))
+                    ))
+
+                else:
+                    self._set_is_realizable(False)
+
                 return self._is_realizable
+
+    def _set_is_realizable(self, value):
+        self._is_realizable = value
+        if value:
+            self._is_realizable_nece_cond = True
+        else:
+            self._set_num_blocks(0)
+
+    def _set_is_realizable_nece_cond(self, value):
+        self._is_realizable_nece_cond = value
+        if not value:
+            self._is_realizable = False
+            self._set_num_blocks(0)
 
     def get_conjectured_realizable_necessary_condition_vector(self):
         """If the realizable set K is enumerated as k_0 < k_1 < ... < k_{n-1}, then this method returns the list of
@@ -252,7 +305,10 @@ class Realizable_Set:
         """Calculate all (k+1) x (k+1) strictly upper triangular matrices that realize this `Realizable_Set`, where k
         is the largest element of this instance.
 
-        :return: A `list` of `Realizing_Matrix`. If no matrices realize this set, an empty list is returned.
+        If `Realizing_Matrix_Template.remember_instances is True`, then this instance will remember the output of this
+        method and return the same `list` on future calls. Otherwise, this method will recalculate its output.
+
+        :return: A `list` of `Realizing_Matrix_Template`. If no matrices realize this set, an empty list is returned.
         """
 
         kp = self.get_max()
@@ -264,20 +320,26 @@ class Realizable_Set:
         else:
 
             try:
-                self._realization_templates = self._get_realization_templates_dfs_helper(
+                ret = self._get_realization_templates_dfs_helper(
                     0,
                     [None]*size,
                     list(range(size - self.get_min(), size))
                 )
 
             except Not_Realizable:
-                self._realization_templates = []
+                ret = []
 
-            return self._realization_templates
+            if Realizing_Matrix_Template.remember_instances:
+                self._realization_templates = ret
+
+            return ret
 
     def get_realizations(self):
         """Yield all (k+1) x (k+1) permutation matrices that realize this instance, assuming they exist, where k is the
         maximum element of this `Realizable_Set`.
+
+        This method does NOT remember its output, even if `Realizing_Matrix.remember_instances is True`, due to the
+        huge amount of memory that would require.
 
         Warning: If k is large relative to n, where n is `len(self)`, then this generator may return a huge number of
         elements.
@@ -286,22 +348,79 @@ class Realizable_Set:
             for real in template.iterate_realizations():
                 yield real
 
-    def is_blocking(self):
+    def is_blocking(self, use_necessary_condition = True, use_conjectured_shortcircuit = False):
         """Check if this instance represents a blocking set.
 
+        :param use_necessary_condition: (type `bool`, default `True`). Whether to call the method
+        `is_realizable_necessary_condition` to check for non-realizability. Warning: That method can be quite slow if
+        `Realizable_Set.remember_instances is False`, so it is best to set `use_necessary_condition = False` in that
+        case.
+        :param use_conjectured_shortcircuit: (type `bool`, default `False`). Return `True` if there at least one
+        blocking realization, rather than check that all realizations are blocking.
         :return: `True` if this instance represents a blocking set, and `False` otherwise.
         """
-        return len(self.get_blocks()) > 0
 
-    def get_blocks(self):
+        if self._is_blocking is not None:
+            return self._is_blocking
+
+        elif use_conjectured_shortcircuit:
+            kp = self.get_max()
+            size = kp + 1
+            try:
+                self._set_is_blocking(self._is_blocking_shortcircuit_dfs_helper(
+                    0,
+                    [None] * size,
+                    list(range(size - self.get_min(), size))
+                ))
+            except Not_Realizable:
+                self._set_is_realizable(False)
+
+            return self._is_blocking
+
+        elif use_necessary_condition:
+
+            if not self.is_realizable_necessary_condition():
+                self._set_is_blocking(False)
+                if Realizing_Matrix.remember_instances:
+                    self._blocks = []
+                return False
+
+            _, K = self.get_largest_blocking_prefix()
+
+            if K is not None:
+                self._set_is_blocking(K.is_blocking(False))
+            else:
+                self._set_is_blocking(len(self.get_blocks(False)) > 0)
+
+            return self._is_blocking
+
+        else:
+            self._set_is_blocking(len(self.get_blocks(False)) > 0)
+            return self._is_blocking
+
+    def get_blocks(self, use_necessary_condition = True):
         """If this instance represents a blocking set, return all the matrices that realize it. If not, then
-        then return an empty `list`.
+        return an empty `list`.
 
+        If `Realizing_Matrix.remember_instances is True`, then this instance will remember the output of this
+        method and return the same `list` on future calls. Otherwise, this method will recalculate its output.
+
+        :param use_necessary_condition: (type `bool`, default `True`). Whether to call the method
+        `is_realizable_necessary_condition` to check for non-realizability. Warning: That method can be quite slow if
+        `Realizable_Set.remember_instances is False`, so it is best to set `use_necessary_condition = False` in that
+        case.
         :return: A `list` of `Realizing_Matrix`.
         """
 
         if self._blocks is not None:
             return self._blocks
+
+        elif self._is_realizable is not None and not self._is_realizable:
+            ret = []
+            if Realizing_Matrix.remember_instances:
+                self._blocks = ret
+            self._set_num_blocks(0)
+            return ret
 
         else:
 
@@ -310,41 +429,128 @@ class Realizable_Set:
             size = kp + 1
 
             if 2 * n <= kp:
-                self._blocks = []
+                ret = []
 
             else:
-                try:
-                    self._blocks = self._get_blocks_dfs_helper(
-                        0,
-                        [None] * size,
-                        list(range(size - self.get_min(), size))
-                    )
-                    is_blocking = True
 
-                except (Not_Realizable, Not_Blocking):
-                    self._blocks = []
+                if use_necessary_condition and not self.is_realizable_necessary_condition():
+                    ret = []
                     is_blocking = False
+
+                else:
+
+                    try:
+                        ret = self._get_blocks_dfs_helper(
+                            0,
+                            [None] * size,
+                            list(range(size - self.get_min(), size))
+                        )
+                        is_blocking = True
+
+                    except (Not_Realizable, Not_Blocking) as e:
+                        if isinstance(e, Not_Realizable):
+                            self._set_is_realizable(False)
+                        ret = []
+                        is_blocking = False
 
                 if is_blocking:
                     blocks = []
-                    for cols in self._blocks:
+                    for cols in ret:
                         mat = Realizing_Matrix()
                         mat.set_cols([c + n - size for c in cols[:n]], kp, True)
                         mat = Realizing_Matrix.get_instance(mat)
                         blocks.append(mat)
-                    self._blocks = blocks
+                    self._set_is_realizable(True)
+                    ret = blocks
 
-            return self._blocks
+            if Realizing_Matrix.remember_instances:
+                self._blocks = ret
 
-    def blocking_condition(self, m):
-        """Enumerate K as k_1 < k_2 < ... < k_n. This method checks whether the interval [k_m + 1, 2m] intersects the
-        set K or not.
+            self._set_num_blocks(len(ret))
 
-        :param m: Positive `int`.
-        :return: `False` if [k_m + 1, 2m] intersects K, `True` otherwise.
+            return ret
+
+    def get_num_blocks(self, use_necessary_condition = True):
+
+        if self._num_blocks is not None:
+            return self._num_blocks
+
+        elif self._blocks is not None:
+            self._num_blocks = len(self._blocks)
+            return self._num_blocks
+
+        elif self._is_realizable is not None and not self._is_realizable:
+            self._num_blocks = 0
+            return 0
+
+        else:
+
+            if use_necessary_condition:
+
+                if not self.is_realizable_necessary_condition():
+                    self._set_num_blocks(0)
+                    if Realizing_Matrix.remember_instances:
+                        self._blocks = []
+                    return 0
+
+                K, Kc = self.get_largest_blocking_prefix()
+
+                if K is not None:
+                    self._set_num_blocks(K.get_num_blocks(False) * Kc.get_num_blocks(True))
+
+                else:
+                    self._set_num_blocks(len(self.get_blocks()))
+
+            else:
+
+                self._set_num_blocks(len(self.get_blocks()))
+
+            return self._num_blocks
+
+    def get_largest_blocking_prefix(self):
+        """This method returns the largest contiguous subset {k_1, ..., k_i} that is blocking, as well as its
+        normalized complement.
+
+        Even if this instance is not realizable, this method will still return.
+
+        :return: Tuple of length 2, first element is the largest blocking prefix, second is the "normalized complement"
+        of the largest blocking prefix, defined as {k_{i+1} - 2i, ..., k_n - 2i}. If no prefix is blocking, returns
+        (None, None).
         """
-        max_Kp = self[m-1]
-        return all(i not in self for i in range(max_Kp + 1, 2 * m + 1))
+
+        if self._large_blking_pfx is not None:
+            if self._large_blking_pfx != 0:
+                return self._large_blking_pfx, self._norm_compl_large_blking_pfx
+            else:
+                return None, None
+
+        else:
+
+            n = len(self)
+            for i in range(n - 1, 0, -1):
+                Kp = self.get_initial_segment(i)
+                if Kp.is_blocking(False):
+                    K = Realizable_Set.get_instance([k - 2 * i for k in self.K[i:]])
+                    break
+            else:
+                Kp = K = None
+
+            if Kp is not None:
+                self._large_blking_pfx = Kp
+                self._norm_compl_large_blking_pfx = K
+            else:
+                self._large_blking_pfx = self._norm_compl_large_blking_pfx = 0
+
+            return Kp, K
+
+    def _set_num_blocks(self, num):
+        self._num_blocks = num
+        self._is_blocking = num > 0
+
+    def _set_is_blocking(self, value):
+        self._is_blocking = value
+        if not value:
+            self._num_blocks = 0
 
     def get_symmetric_realizations(self, m):
         """Calculate all m x m symmetric permutation matrices that realize this instance.
@@ -375,7 +581,7 @@ class Realizable_Set:
                         cols[j] = i
                 cols = [j if j is not None else i for i,j in enumerate(cols)]
                 A = Realizing_Matrix()
-                A.set_cols(cols,m-1)
+                A.set_cols(cols,m-1,True)
                 A = Realizing_Matrix.get_instance(A)
                 self._symm_realizing_mats.append(A)
 
@@ -497,6 +703,41 @@ class Realizable_Set:
                 return True
 
         return False
+
+    def _is_blocking_shortcircuit_dfs_helper(self, curr_k_index, cols, frontier_cols):
+
+        kp = self.get_max()
+        size = kp + 1
+        n = len(self)
+
+        if len(frontier_cols) == 0:
+
+            if sum(j is not None for j in cols) == n:
+                return None in cols and cols.index(None) == n and min(cols[:n]) == size - n
+            else:
+                raise Not_Realizable
+
+        pre_next_frontier_cols = self._get_pre_next_frontier_cols_helper(curr_k_index, cols)
+
+        non_realizable_branch = True
+
+        for j in frontier_cols:
+
+            next_cols = self._get_next_cols_helper(curr_k_index, j, cols)
+
+            next_frontier_cols = self._get_next_frontier_cols_helper(curr_k_index, j, pre_next_frontier_cols)
+
+            try:
+                return self._is_blocking_shortcircuit_dfs_helper(
+                    curr_k_index + 1,
+                    next_cols,
+                    next_frontier_cols
+                )
+
+            except Not_Realizable:
+                pass
+
+        raise Not_Realizable
 
     def _get_blocks_dfs_helper(self, curr_k_index, cols, frontier_cols):
 
@@ -812,6 +1053,12 @@ class Realizing_Matrix:
         if self.array is not None:
             raise Already_Instantiated_Error
 
+    def get_col(self, i):
+        return self.cols[i]
+
+    def get_row(self, j):
+        return self.cols.index(j)
+
     def __len__(self):
         self._check_init_raise("len")
         return self.array.shape[0]
@@ -1088,7 +1335,7 @@ class Realizing_Matrix_Template (Realizing_Matrix):
                     realization_cols.append(j)
 
             mat = Realizing_Matrix()
-            mat.set_cols(realization_cols, self.K.get_max())
+            mat.set_cols(realization_cols, self.K.get_max(), True)
             mat = Realizing_Matrix.get_instance(mat)
             yield mat
 

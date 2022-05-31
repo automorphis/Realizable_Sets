@@ -29,19 +29,28 @@ realizable_sets = [
     (3, 4, 5, 6, 7, 11)
 ]
 
-non_realizable_sets = [
+non_realizable_sets_with_nece_cond = [
+    (2, 4, 5, 6, 7)
+]
+
+non_realizable_sets_without_nece_cond = [
     (1, 2),
     (1, 2, 3),
     (1, 3, 4),
     (2, 3, 4, 5),
     (2, 3, 4, 6),
-    (2, 4, 5, 6, 7),
-    (2, 4, 5, 6, 8, 9),
-    (2, 4, 5, 6, 8, 10),
     (3, 4, 5, 6, 7, 8),
     (3, 4, 5, 6, 7, 9),
-    (3, 4, 5, 6, 7, 10)
+    (3, 4, 5, 6, 7, 10),
+    (2, 4, 5, 6, 8, 9),
+    (2, 4, 5, 6, 8, 10)
 ]
+
+
+non_realizable_sets = (
+    non_realizable_sets_with_nece_cond +
+    non_realizable_sets_without_nece_cond
+)
 
 blocks = [
     ((1,), [
@@ -490,26 +499,34 @@ non_blocking_skinny_fat_rectangle_dimensions = [
     ((3, 4, 5, 6), (4, 6), (5, 5))
 ]
 
+def set_remember_instances(value):
+    Realizable_Set.remember_instances = value
+    Realizing_Matrix.remember_instances = value
+    Realizing_Matrix_Template.remember_instances = value
+
+    if not value:
+        Realizable_Set.instances = {}
+        Realizing_Matrix.instances = {}
+        Realizing_Matrix_Template.instances = {}
+
+
 class Test_Realizable_Set(TestCase):
 
     def setUp(self):
-        Realizable_Set.remember_instances = True
-        Realizing_Matrix.remember_instances = True
-        Realizing_Matrix_Template.remember_instances = True
+        Realizable_Set.instances = {}
+        Realizing_Matrix.instances = {}
+        Realizing_Matrix_Template.instances = {}
 
     def test_is_realizable(self):
 
-        for _ in range(2):
+        for remember_instances, use_necessary_condition in product([True, False], repeat=2):
+            set_remember_instances(remember_instances)
 
             for K in realizable_sets:
-                self.assertTrue(Realizable_Set.get_instance(K).is_realizable())
+                self.assertTrue(Realizable_Set.get_instance(K).is_realizable(use_necessary_condition))
 
             for K in non_realizable_sets:
-                self.assertFalse(Realizable_Set.get_instance(K).is_realizable())
-
-            Realizable_Set.remember_instances = False
-            Realizing_Matrix.remember_instances = False
-            Realizing_Matrix_Template.remember_instances = False
+                self.assertFalse(Realizable_Set.get_instance(K).is_realizable(use_necessary_condition))
 
     def test_get_blocks(self):
 
@@ -518,12 +535,13 @@ class Test_Realizable_Set(TestCase):
             for _, exp_blocks in blocks
         ))
 
-        for _ in range(2):
+        for remember_instances, use_necessary_condition in product([True, False], repeat=2):
+            set_remember_instances(remember_instances)
 
             for K, exp_blocks in blocks:
 
                 K = Realizable_Set.get_instance(K)
-                calc_blocks = K.get_blocks()
+                calc_blocks = K.get_blocks(use_necessary_condition)
 
                 self.assertEqual(len(calc_blocks), len(exp_blocks))
 
@@ -536,11 +554,17 @@ class Test_Realizable_Set(TestCase):
 
             for K in realizable_non_blocks:
                 K = Realizable_Set.get_instance(K)
-                self.assertEqual(K.get_blocks(), [])
+                self.assertEqual(K.get_blocks(use_necessary_condition), [])
 
-            Realizable_Set.remember_instances = False
-            Realizing_Matrix.remember_instances = False
-            Realizing_Matrix_Template.remember_instances = False
+    def test_is_blocking(self):
+        for remember_instances, use_necessary_condition, use_conjectured_shortcircuit in product([True, False], repeat=3):
+            set_remember_instances(remember_instances)
+            for K in realizable_non_blocks:
+                self.assertFalse(Realizable_Set.get_instance(K).is_blocking(use_necessary_condition, use_conjectured_shortcircuit))
+            for K, _ in blocks:
+                self.assertTrue(Realizable_Set.get_instance(K).is_blocking(use_necessary_condition, use_conjectured_shortcircuit), K)
+
+
 
     def test_get_realization_templates(self):
 
@@ -612,3 +636,30 @@ class Test_Realizable_Set(TestCase):
             Realizable_Set.remember_instances = False
             Realizing_Matrix.remember_instances = False
             Realizing_Matrix_Template.remember_instances = False
+
+    def test_is_realizable_necessary_condition(self):
+
+        for remember_instances in [True, False]:
+
+            set_remember_instances(remember_instances)
+
+            for K in realizable_sets:
+                self.assertTrue(Realizable_Set.get_instance(K).is_realizable_necessary_condition())
+
+            for K in non_realizable_sets_without_nece_cond:
+                self.assertFalse(Realizable_Set.get_instance(K).is_realizable_necessary_condition(), msg=str(K))
+
+            for K in non_realizable_sets_with_nece_cond:
+                self.assertTrue(Realizable_Set.get_instance(K).is_realizable_necessary_condition())
+
+    def test_get_num_blocks(self):
+
+        for remember_instances, use_necessary_condition in product([True, False], repeat=2):
+            set_remember_instances(remember_instances)
+
+            for K in realizable_non_blocks:
+                self.assertEqual(Realizable_Set.get_instance(K).get_num_blocks(use_necessary_condition), 0)
+
+            for K, blks in blocks:
+                self.assertEqual(Realizable_Set.get_instance(K).get_num_blocks(use_necessary_condition), len(blks))
+
